@@ -2,7 +2,7 @@
   "profiles": {
     "otorp": {
       "commandName": "Project",
-      "commandLineArgs": "-i C:\\Users\\Epyon\\Documents\\Development\\payroll\\payroll\\src\\Namely.ACA.Core\\Models -n Namely.Test.Otorp -p test -w"
+      "commandLineArgs": "-i C:\\Models -n Test.Otorp -p test -w"
     }
   }
 }

@@ -38,10 +38,9 @@ namespace otorp
             {
                 using (var r = new StreamReader(file.FullName))
                 {
-                    string line;
                     var messageName = file.Name;
                     var fieldOrder = 1;
-                    var protoLines = new List<string> {"syntax = \"proto3\";\n"};
+                    var protoLines = new List<string> { "syntax = \"proto3\";\n" };
 
                     if (!string.IsNullOrEmpty(options.Namespace))
                     {
@@ -54,32 +53,7 @@ namespace otorp
                     }
 
                     protoLines.Add("message " + messageName.RemoveFileExtension() + " {");
-                
-                    while ((line = r.ReadLine()) != null)
-                    {
-                        var m = propertyPattern.Match(line);
-
-                        if (!m.Success) continue;
-
-                        var matchedType = m.Groups["type"].Value;
-                        protoTypes.TryGetValue(matchedType, out var type);
-                        if (string.IsNullOrEmpty(type))
-                        {
-                            if (IsCollectionType(matchedType))
-                            {
-                                type = GetCollectionType(matchedType);
-                            }
-                            else
-                            {
-                                type = matchedType;
-                                type.ToCamelCase();
-                            }
-                        }
-
-                        var name = m.Groups["name"].Value.ToUnderscoreCase();
-                        protoLines.Add($" {type} {name} = {fieldOrder};");
-                        fieldOrder++;
-                    }
+                    protoLines.AddRange(GenerateProtoMessages(propertyPattern, protoTypes, r, ref fieldOrder));
 
                     protoLines.Add("}\n");
 
@@ -87,25 +61,63 @@ namespace otorp
                         ? $"{directory}\\{messageName.RemoveFileExtension()}.proto"
                         : options.OutputDirectory;
 
-                    if (!options.Overwrite && File.Exists(protoFile))
-                    {
-                        Console.WriteLine($"Proto file {messageName.RemoveFileExtension()} exists! Use -w to overwrite.");
-                    }
-                    else
-                    {
-                        using (var sw = new StreamWriter(protoFile))
-                        {
-                            
-                            foreach (var protoLine in protoLines)
-                            {
-                                sw.WriteLine(protoLine);
-                            }
-                        }
-                    }
+                    WriteMessage(options.Overwrite, messageName, protoLines, protoFile);
                 }
             }
             Console.WriteLine($"Proto files created! Happy Servicing!");
 
+        }
+
+        private static List<string> GenerateProtoMessages(Regex propertyPattern, Dictionary<string, string> protoTypes, StreamReader r, ref int fieldOrder)
+        {
+            string line;
+            var protoLines = new List<string>();
+            while ((line = r.ReadLine()) != null)
+            {
+                var m = propertyPattern.Match(line);
+
+                if (!m.Success) continue;
+
+                var matchedType = m.Groups["type"].Value;
+                protoTypes.TryGetValue(matchedType, out var type);
+                if (string.IsNullOrEmpty(type))
+                {
+                    if (IsCollectionType(matchedType))
+                    {
+                        type = GetCollectionType(matchedType);
+                    }
+                    else
+                    {
+                        type = matchedType;
+                        type.ToCamelCase();
+                    }
+                }
+
+                var name = m.Groups["name"].Value.ToUnderscoreCase();
+                protoLines.Add($" {type} {name} = {fieldOrder};");
+                fieldOrder++;
+            }
+
+            return protoLines;
+        }
+
+        private static void WriteMessage(bool overwrite, string messageName, List<string> protoLines, string protoFile)
+        {
+            if (overwrite && File.Exists(protoFile))
+            {
+                Console.WriteLine($"Proto file {messageName.RemoveFileExtension()} exists! Use -w to overwrite.");
+            }
+            else
+            {
+                using (var sw = new StreamWriter(protoFile))
+                {
+
+                    foreach (var protoLine in protoLines)
+                    {
+                        sw.WriteLine(protoLine);
+                    }
+                }
+            }
         }
 
         private static string GetCollectionType(string type)

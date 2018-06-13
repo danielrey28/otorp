@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "otorp": {
+      "commandName": "Project",
+      "commandLineArgs": "-i C:\\Users\\Epyon\\Documents\\Development\\otorp\\otorp\\otorp\\Model -n Namely.Test.Otorp -p test -w"
+    }
+  }
+}

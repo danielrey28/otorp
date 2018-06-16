@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using CommandLine;
 
@@ -8,18 +9,17 @@ namespace otorp
 {
     class Program
     {
+        private const string PropertPattern = @"(?<type>[^\s]+)\s(?<name>[^\s]+)(?=\s\{\sget;)";
+        private static List<string> MessagesToImport = new List<string>();
         static void Main(string[] args)
         {
             Parser.Default.ParseArguments<Options>(args)
                 .WithParsed(GenerateProtoFiles);
-            Console.ReadLine();
         }
 
         private static void GenerateProtoFiles(Options options)
         {
             
-            var propertyPattern = new Regex(@"(?<type>[^\s]+)\s(?<name>[^\s]+)(?=\s\{\sget;)");
-
             var protoTypes = new Dictionary<string, string>
             {
                 {"int", "int32"},
@@ -29,57 +29,46 @@ namespace otorp
             };
 
             
-
             Console.WriteLine("Creating Proto files...");
 
             var directory = new DirectoryInfo(options.InputDirectory);
-
+            
             foreach (var file in directory.GetFiles("*.cs"))
             {
                 using (var r = new StreamReader(file.FullName))
                 {
                     var messageName = file.Name;
-                    var fieldOrder = 1;
-                    var protoLines = new List<string> { "syntax = \"proto3\";\n" };
-
-                    if (!string.IsNullOrEmpty(options.Namespace))
-                    {
-                        protoLines.Add($"option csharp_namespace = \"{options.Namespace}\";\n");
-                    }
-
-                    if (!string.IsNullOrEmpty(options.Package))
-                    {
-                        protoLines.Add($"package = {options.Package};\n");
-                    }
-
-                    protoLines.Add("message " + messageName.RemoveFileExtension() + " {");
-                    protoLines.AddRange(GenerateProtoMessages(propertyPattern, protoTypes, r, ref fieldOrder));
-
-                    protoLines.Add("}\n");
+                    
+                    var generatedMessageProperties = GenerateProtoMessages(protoTypes, r);
 
                     var protoFile = string.IsNullOrEmpty(options.OutputDirectory)
                         ? $"{directory}\\{messageName.RemoveFileExtension()}.proto"
                         : options.OutputDirectory;
 
-                    WriteMessage(options.Overwrite, messageName, protoLines, protoFile);
+                    WriteMessage(options, messageName, generatedMessageProperties, protoFile);
                 }
             }
             Console.WriteLine($"Proto files created! Happy Servicing!");
 
         }
 
-        private static List<string> GenerateProtoMessages(Regex propertyPattern, Dictionary<string, string> protoTypes, StreamReader r, ref int fieldOrder)
+        private static List<MessageProperty> GenerateProtoMessages(Dictionary<string, string> protoTypes, StreamReader r)
         {
+            var messageProperties = new List<MessageProperty>();
+            var propertyPattern = new Regex(PropertPattern);
             string line;
-            var protoLines = new List<string>();
+
+            var fieldOrder = 1;
             while ((line = r.ReadLine()) != null)
             {
                 var m = propertyPattern.Match(line);
 
                 if (!m.Success) continue;
 
-                var matchedType = m.Groups["type"].Value;
+                var matchedType = m.Groups["type"].Value.Replace("?", "");
+
                 protoTypes.TryGetValue(matchedType, out var type);
+
                 if (string.IsNullOrEmpty(type))
                 {
                     if (IsCollectionType(matchedType))
@@ -89,21 +78,31 @@ namespace otorp
                     else
                     {
                         type = matchedType;
+                        MessagesToImport.Add(type.ToLower());
                         type.ToCamelCase();
                     }
                 }
 
                 var name = m.Groups["name"].Value.ToUnderscoreCase();
-                protoLines.Add($" {type} {name} = {fieldOrder};");
+
+                messageProperties.Add(
+                    new MessageProperty
+                    {
+                        Order = fieldOrder,
+                        Name = name,
+                        Type = type
+                    });
+
+                
                 fieldOrder++;
             }
 
-            return protoLines;
+            return messageProperties;
         }
 
-        private static void WriteMessage(bool overwrite, string messageName, List<string> protoLines, string protoFile)
+        private static void WriteMessage(Options options, string messageName, List<MessageProperty> messageProperties, string protoFile)
         {
-            if (overwrite && File.Exists(protoFile))
+            if (!options.Overwrite && File.Exists(protoFile))
             {
                 Console.WriteLine($"Proto file {messageName.RemoveFileExtension()} exists! Use -w to overwrite.");
             }
@@ -111,13 +110,42 @@ namespace otorp
             {
                 using (var sw = new StreamWriter(protoFile))
                 {
-
-                    foreach (var protoLine in protoLines)
-                    {
-                        sw.WriteLine(protoLine);
-                    }
+                    WriteMessageHeaders(sw, messageProperties, options);
+                    sw.WriteLine();
+                    WriteMessageBody(sw, messageProperties, messageName, options);
                 }
             }
+        }
+
+        private static void WriteMessageHeaders(StreamWriter sw, List<MessageProperty> messageProperties, Options options)
+        {
+            sw.WriteLine("syntax = \"proto3\";\n");
+           
+            if (!string.IsNullOrEmpty(options.Namespace))
+            {
+                sw.WriteLine($"option csharp_namespace = \"{options.Namespace}\";\n");
+            }
+
+            if (!string.IsNullOrEmpty(options.Package))
+            {
+                sw.WriteLine($"package = {options.Package};\n");
+            }
+
+            foreach (var message in MessagesToImport.Distinct())
+            {
+                sw.WriteLine($"import \"{message}.proto\";");
+            }
+        }
+
+
+        private static void WriteMessageBody(StreamWriter sw, List<MessageProperty> protoLines, string messageName, Options options)
+        {
+            sw.WriteLine("message " + messageName.RemoveFileExtension() + " {");
+            foreach (var protoLine in protoLines)
+            {
+                sw.WriteLine($" {protoLine.Type} {protoLine.Name} = {protoLine.Order};");
+            }
+            sw.WriteLine("}\n");
         }
 
         private static string GetCollectionType(string type)
